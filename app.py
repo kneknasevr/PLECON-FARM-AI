@@ -17,11 +17,38 @@ st.caption("Δοκιμαστική ανίχνευση και καταμέτρη�
 def load_model():
     return YOLO("yolo11n.pt")
 
-def detect(frame, confidence):
+def detect(frame, confidence, tiled=True):
+    """Combine full-image and overlapping tile predictions, then deduplicate."""
     model = load_model()
-    result = model.predict(source=frame, conf=confidence, classes=[18], verbose=False, imgsz=960)[0]
-    boxes = result.boxes.xyxy.cpu().numpy().astype(int) if result.boxes is not None else np.empty((0, 4), dtype=int)
-    return boxes
+    h, w = frame.shape[:2]
+    regions = [(0, 0, w, h)]
+    if tiled and min(h, w) >= 480:
+        # Four overlapping tiles; overlap prevents splitting sheep at tile edges.
+        tile_w, tile_h = int(w * 0.60), int(h * 0.60)
+        for x in (0, w - tile_w):
+            for y in (0, h - tile_h):
+                regions.append((x, y, x + tile_w, y + tile_h))
+    all_boxes, scores = [], []
+    for x1, y1, x2, y2 in regions:
+        crop = frame[y1:y2, x1:x2]
+        result = model.predict(source=crop, conf=confidence, classes=[18],
+                               verbose=False, imgsz=960)[0]
+        if result.boxes is None:
+            continue
+        coords = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+        for b, score in zip(coords, confs):
+            bx1, by1, bx2, by2 = b
+            all_boxes.append([int(bx1 + x1), int(by1 + y1),
+                              int(bx2 + x1), int(by2 + y1)])
+            scores.append(float(score))
+    if not all_boxes:
+        return np.empty((0, 4), dtype=int)
+    xywh = [[b[0], b[1], max(1, b[2]-b[0]), max(1, b[3]-b[1])] for b in all_boxes]
+    keep = cv2.dnn.NMSBoxes(xywh, scores, score_threshold=confidence, nms_threshold=0.40)
+    if len(keep) == 0:
+        return np.empty((0, 4), dtype=int)
+    return np.array([all_boxes[int(i)] for i in np.array(keep).flatten()], dtype=int)
 
 def annotate(rgb, boxes):
     image = Image.fromarray(rgb.copy())
@@ -31,7 +58,8 @@ def annotate(rgb, boxes):
         draw.text((int(x1) + 3, max(0, int(y1) - 17)), str(i), fill="#12C7A1", stroke_width=1, stroke_fill="black")
     return image
 
-confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχνευσης", 0.10, 0.90, 0.25, 0.05)
+confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχνευσης", 0.10, 0.90, 0.20, 0.05)
+tiled = st.sidebar.checkbox("Ενισχυμένη ανίχνευση (τμήματα εικόνας)", value=True, help="Αναλύει την εικόνα σε επικαλυπτόμενα τμήματα. Πιο αργή αλλά συχνά βρίσκει μικρότερα ζώα.")
 st.sidebar.info("Το γενικό μοντέλο ενδέχεται να παραλείψει πρόβατα που επικαλύπτονται.")
 uploaded = st.file_uploader("Ανέβασε φωτογραφία ή σύντομο βίντεο", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"])
 
@@ -40,9 +68,10 @@ if uploaded is not None:
     if suffix in {".jpg", ".jpeg", ".png"}:
         try:
             rgb = np.array(Image.open(uploaded).convert("RGB"))
-            boxes = detect(rgb, confidence)
+            boxes = detect(rgb, confidence, tiled)
             output = annotate(rgb, boxes)
             st.metric("Ανιχνεύσεις προβάτων", len(boxes))
+            st.caption("Δοκιμαστική καταμέτρηση: ελέγξτε οπτικά για παραλείψεις και διπλά πλαίσια.")
             st.image(output, caption="Αριθμημένα πλαίσια ανίχνευσης", use_container_width=True)
             buf = io.BytesIO()
             output.save(buf, format="PNG")
@@ -78,7 +107,7 @@ if uploaded is not None:
                         break
                     if frame_idx % stride == 0:
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        boxes = detect(rgb, confidence)
+                        boxes = detect(rgb, confidence, tiled)
                         records.append({"second": round(frame_idx / fps, 1), "detected_sheep": len(boxes)})
                         preview.image(annotate(rgb, boxes), caption=f"Καρέ στα {frame_idx / fps:.1f} δευτ.", use_container_width=True)
                         progress.progress(min(1.0, len(records) / max_samples))
