@@ -58,6 +58,53 @@ def image_png_bytes(rgb):
     Image.fromarray(rgb).save(buf, format="PNG")
     return buf.getvalue()
 
+def correction_editor(rgb, boxes, identity, title="✏️ Διόρθωση"):
+    st.subheader(title)
+    state_key = "edited_" + identity
+    nonce_key = "nonce_" + identity
+    if state_key not in st.session_state:
+        st.session_state[state_key] = [list(map(int, b)) for b in boxes]
+    if nonce_key not in st.session_state:
+        st.session_state[nonce_key] = 0
+    edited = st.session_state[state_key]
+    st.caption("Διάλεξε ενέργεια και πάτησε στην εικόνα. Η προσθήκη τοποθετεί νέο πλαίσιο στο σημείο. Η αφαίρεση διαγράφει μόνο πλαίσιο που πάτησες.")
+    action = st.radio("Ενέργεια", ["Αφαίρεση", "Προσθήκη"], horizontal=True, key="action_" + identity)
+    a, b = st.columns(2)
+    width = a.slider("Πλάτος νέου πλαισίου", 30, 400, 110, 10, key="width_" + identity)
+    height = b.slider("Ύψος νέου πλαισίου", 30, 400, 120, 10, key="height_" + identity)
+    st.metric("Διορθωμένα πρόβατα", len(edited))
+    display_width = min(1100, rgb.shape[1])
+    scale = display_width / rgb.shape[1]
+    preview = annotate(rgb, np.asarray(edited, dtype=int).reshape(-1, 4))
+    preview = preview.resize((display_width, max(1, round(rgb.shape[0] * scale))))
+    point = streamlit_image_coordinates(preview, key=f"editor_{identity}_{st.session_state[nonce_key]}")
+    if point is not None:
+        x, y = int(point["x"] / scale), int(point["y"] / scale)
+        if action == "Προσθήκη":
+            x1, y1 = max(0, x - width // 2), max(0, y - height // 2)
+            edited.append([x1, y1, min(rgb.shape[1]-1, x1 + width), min(rgb.shape[0]-1, y1 + height)])
+        else:
+            inside = [i for i, (x1,y1,x2,y2) in enumerate(edited) if x1 <= x <= x2 and y1 <= y <= y2]
+            if inside:
+                # Prefer the smallest box under the click when boxes overlap.
+                selected = min(inside, key=lambda i: (edited[i][2]-edited[i][0]) * (edited[i][3]-edited[i][1]))
+                edited.pop(selected)
+            else:
+                st.info("Δεν υπάρχει πλαίσιο σε αυτό το σημείο. Πάτησε μέσα στο πράσινο πλαίσιο.")
+        st.session_state[nonce_key] += 1
+        st.rerun()
+    if st.button("Επαναφορά πλαισίων", key="reset_" + identity):
+        st.session_state[state_key] = [list(map(int, box)) for box in boxes]
+        st.session_state[nonce_key] += 1
+        st.rerun()
+    output = annotate(rgb, np.asarray(edited, dtype=int).reshape(-1, 4))
+    buf = io.BytesIO()
+    output.save(buf, format="PNG")
+    st.download_button("Λήψη διορθωμένης εικόνας", buf.getvalue(), file_name=f"pelcon_{identity}.png", mime="image/png", key="png_" + identity)
+    df = pd.DataFrame([{"number": i, "x1": box[0], "y1": box[1], "x2": box[2], "y2": box[3]} for i, box in enumerate(edited, 1)])
+    st.download_button("Λήψη διορθώσεων CSV", df.to_csv(index=False).encode("utf-8-sig"), file_name=f"pelcon_{identity}.csv", mime="text/csv", key="csv_" + identity)
+    return edited
+
 def annotate(rgb, boxes):
     image = Image.fromarray(rgb.copy())
     draw = ImageDraw.Draw(image)
@@ -79,73 +126,14 @@ if uploaded is not None:
             rgb = np.array(Image.open(uploaded).convert("RGB"))
             boxes = detect(rgb, confidence, tiled, nms_threshold)
             image_id = hashlib.sha256(uploaded.getvalue()).hexdigest()[:16]
-            session_key = "corrections_" + image_id
-            if session_key not in st.session_state:
-                st.session_state[session_key] = [list(map(int, box)) for box in boxes]
-            corrected = st.session_state[session_key]
-
-            st.subheader("✏️ Χειροκίνητη διόρθωση")
-            st.caption("Πάτησε πάνω σε πλαίσιο για αφαίρεση ή πάνω σε πρόβατο που λείπει για προσθήκη. Οι διορθώσεις μένουν προσωρινά στη συνεδρία· κατέβασε το ZIP για να τις κρατήσεις.")
-            mode = st.radio("Ενέργεια στο πάτημα της εικόνας", ["Αφαίρεση πλαισίου", "Προσθήκη πλαισίου"], horizontal=True)
-            col_w, col_h = st.columns(2)
-            with col_w:
-                new_width = st.slider("Πλάτος νέου πλαισίου (pixels)", 30, 400, 110, 10)
-            with col_h:
-                new_height = st.slider("Ύψος νέου πλαισίου (pixels)", 30, 400, 120, 10)
-
-            st.metric("Διορθωμένος αριθμός προβάτων", len(corrected))
-            display_width = min(1100, rgb.shape[1])
-            scale = display_width / rgb.shape[1]
-            display_height = max(1, round(rgb.shape[0] * scale))
-            preview = annotate(rgb, np.asarray(corrected, dtype=int).reshape(-1, 4))
-            preview = preview.resize((display_width, display_height))
-            click_key = "click_nonce_" + image_id
-            if click_key not in st.session_state:
-                st.session_state[click_key] = 0
-            click = streamlit_image_coordinates(preview, key=f"annotate_{image_id}_{st.session_state[click_key]}")
-            if click is not None:
-                x, y = int(click["x"] / scale), int(click["y"] / scale)
-                if mode == "Προσθήκη πλαισίου":
-                    x1 = max(0, x - new_width // 2)
-                    y1 = max(0, y - new_height // 2)
-                    x2 = min(rgb.shape[1] - 1, x1 + new_width)
-                    y2 = min(rgb.shape[0] - 1, y1 + new_height)
-                    corrected.append([x1, y1, x2, y2])
-                elif corrected:
-                    containing = [i for i, (x1,y1,x2,y2) in enumerate(corrected) if x1 <= x <= x2 and y1 <= y <= y2]
-                    candidates = containing if containing else list(range(len(corrected)))
-                    nearest = min(candidates, key=lambda i: ((corrected[i][0]+corrected[i][2])/2-x)**2 + ((corrected[i][1]+corrected[i][3])/2-y)**2)
-                    corrected.pop(nearest)
-                st.session_state[click_key] += 1
-                st.rerun()
-
-            if st.button("Επαναφορά αρχικών ανιχνεύσεων"):
-                st.session_state[session_key] = [list(map(int, box)) for box in boxes]
-                st.session_state[click_key] += 1
-                st.rerun()
-
-            actual = st.number_input("Πραγματικός αριθμός προβάτων (εφόσον τον γνωρίζεις)", min_value=0, value=0, step=1)
-            if actual > 0:
-                difference = len(corrected) - actual
-                st.metric("Διαφορά διορθωμένης καταμέτρησης", f"{difference:+d}")
-                st.caption("Η συμφωνία αριθμού δεν αποδεικνύει ότι όλα τα πλαίσια είναι σωστά.")
-
-            final_image = annotate(rgb, np.asarray(corrected, dtype=int).reshape(-1, 4))
-            image_buffer = io.BytesIO()
-            final_image.save(image_buffer, format="PNG")
-            st.download_button("Λήψη διορθωμένης εικόνας", image_buffer.getvalue(), file_name="pelcon_corrected.png", mime="image/png")
-            csv = pd.DataFrame([{"number": i, "x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3]} for i, b in enumerate(corrected, 1)])
-            st.download_button("Λήψη διορθωμένων CSV", csv.to_csv(index=False).encode("utf-8-sig"), file_name="pelcon_corrected.csv", mime="text/csv")
-
-            # YOLO dataset format: class x_center y_center width height (normalized).
+            corrected = correction_editor(rgb, boxes, image_id)
+            actual = st.number_input("Πραγματικός αριθμός προβάτων", min_value=0, value=0, step=1)
+            if actual:
+                st.metric("Διαφορά", f"{len(corrected) - actual:+d}")
             h, w = rgb.shape[:2]
             labels = []
             for x1, y1, x2, y2 in corrected:
-                xc = ((x1 + x2) / 2) / w
-                yc = ((y1 + y2) / 2) / h
-                bw = (x2 - x1) / w
-                bh = (y2 - y1) / h
-                labels.append(f"0 {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}")
+                labels.append(f"0 {((x1+x2)/2)/w:.6f} {((y1+y2)/2)/h:.6f} {(x2-x1)/w:.6f} {(y2-y1)/h:.6f}")
             archive_buffer = io.BytesIO()
             with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(f"images/{image_id}.png", image_png_bytes(rgb))
@@ -172,6 +160,7 @@ if uploaded is not None:
                 stride = max(1, round(fps * 2))
                 max_samples = 30
                 records = []
+                sample_frames = []
                 preview = st.empty()
                 progress = st.progress(0)
                 frame_idx = 0
@@ -183,6 +172,7 @@ if uploaded is not None:
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         boxes = detect(rgb, confidence, tiled, nms_threshold)
                         records.append({"second": round(frame_idx / fps, 1), "detected_sheep": len(boxes)})
+                        sample_frames.append((rgb.copy(), boxes.copy()))
                         preview.image(annotate(rgb, boxes), caption=f"Καρέ στα {frame_idx / fps:.1f} δευτ.", use_container_width=True)
                         progress.progress(min(1.0, len(records) / max_samples))
                     frame_idx += 1
@@ -192,6 +182,11 @@ if uploaded is not None:
                     st.metric("Μέγιστες ανιχνεύσεις σε ένα καρέ", int(df.detected_sheep.max()))
                     st.line_chart(df.set_index("second")["detected_sheep"])
                     st.dataframe(df, use_container_width=True)
+                    st.subheader("Επίλεξε καρέ για διόρθωση")
+                    selected_frame = st.selectbox("Χρόνος καρέ", list(range(len(records))), format_func=lambda i: f"{records[i]['second']} δευτ. — {records[i]['detected_sheep']} ανιχνεύσεις")
+                    frame_rgb, frame_boxes = sample_frames[selected_frame]
+                    video_id = hashlib.sha256(uploaded.getvalue()).hexdigest()[:12]
+                    correction_editor(frame_rgb, frame_boxes, f"{video_id}_frame_{selected_frame}", "✏️ Διόρθωση επιλεγμένου καρέ βίντεο")
                     st.download_button("Λήψη CSV βίντεο", df.to_csv(index=False).encode("utf-8-sig"), file_name="pelcon_video_counts.csv", mime="text/csv")
                 else:
                     st.error("Δεν βρέθηκαν καρέ για ανάλυση.")
