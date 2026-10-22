@@ -17,7 +17,7 @@ st.caption("Δοκιμαστική ανίχνευση και καταμέτρη�
 def load_model():
     return YOLO("yolo11n.pt")
 
-def detect(frame, confidence, tiled=True):
+def detect(frame, confidence, tiled=True, nms_threshold=0.35):
     """Combine full-image and overlapping tile predictions, then deduplicate."""
     model = load_model()
     h, w = frame.shape[:2]
@@ -45,7 +45,7 @@ def detect(frame, confidence, tiled=True):
     if not all_boxes:
         return np.empty((0, 4), dtype=int)
     xywh = [[b[0], b[1], max(1, b[2]-b[0]), max(1, b[3]-b[1])] for b in all_boxes]
-    keep = cv2.dnn.NMSBoxes(xywh, scores, score_threshold=confidence, nms_threshold=0.40)
+    keep = cv2.dnn.NMSBoxes(xywh, scores, score_threshold=confidence, nms_threshold=nms_threshold)
     if len(keep) == 0:
         return np.empty((0, 4), dtype=int)
     return np.array([all_boxes[int(i)] for i in np.array(keep).flatten()], dtype=int)
@@ -59,6 +59,7 @@ def annotate(rgb, boxes):
     return image
 
 confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχνευσης", 0.10, 0.90, 0.20, 0.05)
+nms_threshold = st.sidebar.slider("Αφαίρεση επικαλυπτόμενων πλαισίων (NMS)", 0.20, 0.70, 0.35, 0.05, help="Μικρότερη τιμή αφαιρεί περισσότερα επικαλυπτόμενα πλαίσια, αλλά μπορεί να κρύψει γειτονικά πρόβατα.")
 tiled = st.sidebar.checkbox("Ενισχυμένη ανίχνευση (τμήματα εικόνας)", value=True, help="Αναλύει την εικόνα σε επικαλυπτόμενα τμήματα. Πιο αργή αλλά συχνά βρίσκει μικρότερα ζώα.")
 st.sidebar.info("Το γενικό μοντέλο ενδέχεται να παραλείψει πρόβατα που επικαλύπτονται.")
 uploaded = st.file_uploader("Ανέβασε φωτογραφία ή σύντομο βίντεο", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"])
@@ -68,10 +69,15 @@ if uploaded is not None:
     if suffix in {".jpg", ".jpeg", ".png"}:
         try:
             rgb = np.array(Image.open(uploaded).convert("RGB"))
-            boxes = detect(rgb, confidence, tiled)
+            boxes = detect(rgb, confidence, tiled, nms_threshold)
             output = annotate(rgb, boxes)
             st.metric("Ανιχνεύσεις προβάτων", len(boxes))
             st.caption("Δοκιμαστική καταμέτρηση: ελέγξτε οπτικά για παραλείψεις και διπλά πλαίσια.")
+            actual = st.number_input("Πραγματικός αριθμός προβάτων (εφόσον τον γνωρίζεις)", min_value=0, value=0, step=1)
+            if actual > 0:
+                difference = len(boxes) - actual
+                st.metric("Διαφορά ανιχνεύσεων από πραγματικό πλήθος", f"{difference:+d}")
+                st.caption("Η διαφορά πλήθους δεν ισοδυναμεί με ακρίβεια ανίχνευσης: μπορεί να υπάρχουν ταυτόχρονα διπλά πλαίσια και παραλείψεις.")
             st.image(output, caption="Αριθμημένα πλαίσια ανίχνευσης", use_container_width=True)
             buf = io.BytesIO()
             output.save(buf, format="PNG")
@@ -107,7 +113,7 @@ if uploaded is not None:
                         break
                     if frame_idx % stride == 0:
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        boxes = detect(rgb, confidence, tiled)
+                        boxes = detect(rgb, confidence, tiled, nms_threshold)
                         records.append({"second": round(frame_idx / fps, 1), "detected_sheep": len(boxes)})
                         preview.image(annotate(rgb, boxes), caption=f"Καρέ στα {frame_idx / fps:.1f} δευτ.", use_container_width=True)
                         progress.progress(min(1.0, len(records) / max_samples))
