@@ -14,6 +14,9 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(page_title="PELCON FARM AI", page_icon="🐑", layout="wide")
 st.title("🐑 PELCON FARM AI")
+from sheep_registry import render_registry
+with st.expander("📒 Μητρώο προβάτων (μόνιμη αποθήκευση)", expanded=False):
+    render_registry()
 st.caption("Δοκιμαστική ανίχνευση και καταμέτρηση προβάτων — χωρίς σύνδεση με κάμερες")
 
 @st.cache_resource(show_spinner="Φόρτωση μοντέλου τεχνητής νοημοσύνης...")
