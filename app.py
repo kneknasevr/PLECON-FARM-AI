@@ -18,6 +18,7 @@ from sheep_registry import render_registry
 with st.expander("📒 Μητρώο προβάτων (μόνιμη αποθήκευση)", expanded=False):
     render_registry()
 st.caption("Δοκιμαστική ανίχνευση και καταμέτρηση προβάτων — χωρίς σύνδεση με κάμερες")
+st.info("Το μπλε περίγραμμα είναι σχηματικό, όχι πραγματική ανάλυση στάσης ή βάδισης.")
 
 @st.cache_resource(show_spinner="Φόρτωση μοντέλου τεχνητής νοημοσύνης...")
 def load_model():
@@ -109,13 +110,39 @@ def correction_editor(rgb, boxes, identity, title="✏️ Διόρθωση"):
     return edited
 
 def annotate(rgb, boxes):
+    """Render counted sheep with an illustrative animal silhouette or bounding boxes.
+
+    The silhouette is a visualization derived from detection rectangles, NOT
+    anatomical pose estimation. Do not use its legs to assess lameness.
+    """
     image = Image.fromarray(rgb.copy())
     draw = ImageDraw.Draw(image)
+    style = st.session_state.get("overlay_style", "Σχηματικό περίγραμμα")
     for i, (x1, y1, x2, y2) in enumerate(boxes, 1):
-        draw.rectangle((int(x1), int(y1), int(x2), int(y2)), outline="#12C7A1", width=4)
-        draw.text((int(x1) + 3, max(0, int(y1) - 17)), str(i), fill="#12C7A1", stroke_width=1, stroke_fill="black")
+        x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+        w, h = max(1, x2 - x1), max(1, y2 - y1)
+        if style == "Ορθογώνια πλαίσια":
+            draw.rectangle((x1, y1, x2, y2), outline="#12C7A1", width=3)
+        else:
+            # Approximate sheep shape within the detection box. This is not
+            # measured limb positioning, gait tracking, or pose inference.
+            p = lambda fx, fy: (int(x1 + fx * w), int(y1 + fy * h))
+            spine = [p(.12,.24), p(.26,.13), p(.58,.12), p(.76,.22)]
+            head = [p(.76,.22), p(.85,.32), p(.94,.42), p(.91,.55), p(.82,.54)]
+            belly = [p(.82,.54), p(.67,.68), p(.27,.67), p(.12,.56), p(.12,.24)]
+            legs = [
+                [p(.25,.66),p(.23,.85),p(.20,.97)],
+                [p(.37,.67),p(.40,.86),p(.39,.97)],
+                [p(.65,.67),p(.64,.86),p(.61,.97)],
+                [p(.76,.62),p(.78,.84),p(.80,.97)],
+            ]
+            for line in [spine, head, belly, *legs]:
+                draw.line(line, fill="#345BFF", width=max(2, min(5, w // 60)), joint="curve")
+            draw.ellipse((x1 + int(.87*w), y1 + int(.39*h), x1 + int(.89*w), y1 + int(.41*h)), fill="#345BFF")
+        draw.text((x1 + 3, max(0, y1 - 18)), str(i), fill="#12C7A1", stroke_width=2, stroke_fill="black")
     return image
 
+st.sidebar.radio("Εμφάνιση καταμετρημένων προβάτων", ["Σχηματικό περίγραμμα", "Ορθογώνια πλαίσια"], key="overlay_style", help="Το περίγραμμα είναι ενδεικτικό και δεν αναγνωρίζει πραγματικές αρθρώσεις ή χωλότητα.")
 confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχνευσης", 0.10, 0.90, 0.20, 0.05)
 nms_threshold = st.sidebar.slider("Αφαίρεση επικαλυπτόμενων πλαισίων (NMS)", 0.20, 0.70, 0.35, 0.05, help="Μικρότερη τιμή αφαιρεί περισσότερα επικαλυπτόμενα πλαίσια, αλλά μπορεί να κρύψει γειτονικά πρόβατα.")
 tiled = st.sidebar.checkbox("Ενισχυμένη ανίχνευση (τμήματα εικόνας)", value=True, help="Αναλύει την εικόνα σε επικαλυπτόμενα τμήματα. Πιο αργή αλλά συχνά βρίσκει μικρότερα ζώα.")
