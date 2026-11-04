@@ -1,9 +1,28 @@
 """Permanent sheep registry backed by Supabase Auth, Postgres and private Storage."""
 import io
 import uuid
+import numpy as np
+import cv2
 import streamlit as st
 from PIL import Image
 from supabase import create_client
+
+def _visual_features(raw):
+    """Experimental appearance comparison, NOT an individual animal ID model."""
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    image.thumbnail((512, 512))
+    rgb = np.asarray(image)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [24, 24], [0, 180, 0, 256])
+    cv2.normalize(hist, hist)
+    gray = cv2.resize(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY), (9, 8))
+    dhash = (gray[:, 1:] > gray[:, :-1]).flatten()
+    return hist, dhash
+
+def _appearance_score(first, second):
+    color = max(0.0, cv2.compareHist(first[0], second[0], cv2.HISTCMP_CORREL))
+    shape = 1.0 - float(np.mean(first[1] != second[1]))
+    return round(100 * (0.65 * color + 0.35 * shape), 1)
 
 def render_registry():
     st.header("🐑 Μητρώο προβάτων — μόνιμη αποθήκευση")
@@ -98,3 +117,27 @@ def render_registry():
                 st.image(signed["signedURL"], width=200)
             except Exception:
                 st.caption("Η προεπισκόπηση φωτογραφίας δεν είναι διαθέσιμη.")
+
+        st.divider()
+        st.subheader("🔍 Δοκιμή οπτικής σύγκρισης")
+        st.caption("Συγκρίνει χρώμα και γενική εικόνα με τις φωτογραφίες αναφοράς του επιλεγμένου ζώου. Δεν αποτελεί αξιόπιστη ατομική ταυτοποίηση.")
+        candidate = st.file_uploader("Νέα φωτογραφία για δοκιμή", type=["jpg", "jpeg", "png", "webp"], key="identity_test_upload")
+        if st.button("Σύγκριση με φωτογραφίες αναφοράς", disabled=not candidate or not saved):
+            try:
+                probe = _visual_features(candidate.getvalue())
+                scores = []
+                for reference in saved:
+                    try:
+                        raw = client.storage.from_("sheep-photos").download(reference["storage_path"])
+                        scores.append(_appearance_score(probe, _visual_features(raw)))
+                    except Exception:
+                        continue
+                if not scores:
+                    st.error("Δεν ήταν δυνατή η ανάγνωση φωτογραφιών αναφοράς από το Supabase.")
+                else:
+                    st.image(candidate, caption="Νέα φωτογραφία", width=280)
+                    st.metric("Μεγαλύτερη οπτική ομοιότητα", f"{max(scores):.1f}%")
+                    st.write(f"Συγκρίθηκαν {len(scores)} αποθηκευμένες φωτογραφίες του ζώου {labels[selected]}.")
+                    st.warning("Το ποσοστό είναι δείκτης οπτικής ομοιότητας, ΟΧΙ πιθανότητα ότι πρόκειται για το ίδιο πρόβατο. Δοκίμασε και φωτογραφία διαφορετικού ζώου.")
+            except Exception as exc:
+                st.error(f"Αποτυχία σύγκρισης: {exc}")
