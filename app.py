@@ -2,6 +2,7 @@ import io
 import hashlib
 import zipfile
 import tempfile
+import threading
 from pathlib import Path
 
 import cv2
@@ -11,6 +12,8 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
 from streamlit_image_coordinates import streamlit_image_coordinates
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import av
 
 st.set_page_config(page_title="PELCON FARM AI", page_icon="🐑", layout="wide")
 st.title("🐑 PELCON FARM AI")
@@ -143,6 +146,45 @@ def annotate(rgb, boxes):
     return image
 
 st.sidebar.radio("Εμφάνιση καταμετρημένων προβάτων", ["Σχηματικό περίγραμμα", "Ορθογώνια πλαίσια"], key="overlay_style", help="Το περίγραμμα είναι ενδεικτικό και δεν αναγνωρίζει πραγματικές αρθρώσεις ή χωλότητα.")
+
+_live_camera_lock = threading.Lock()
+
+with st.expander("📱 Live κάμερα κινητού — καταμέτρηση", expanded=False):
+    st.caption("Πάτησε START, επίτρεψε την κάμερα και στόχευσε τα πρόβατα. Μετρά τα ζώα στο καρέ, όχι μοναδικά ζώα που περνούν.")
+    st.warning("Πιλοτική λειτουργία WebRTC. Σε ορισμένα δίκτυα 5G μπορεί να μην συνδέεται χωρίς TURN server.")
+    live_state = {"count": 0}
+
+    def live_video_frame(frame):
+        bgr = frame.to_ndarray(format="bgr24")
+        h, w = bgr.shape[:2]
+        scale = min(1.0, 640.0 / max(h, w))
+        if scale < 1.0:
+            bgr = cv2.resize(bgr, (round(w * scale), round(h * scale)))
+        if _live_camera_lock.acquire(blocking=False):
+            try:
+                prediction = load_model().predict(bgr, classes=[18], conf=0.3, imgsz=640, verbose=False)[0]
+                boxes = prediction.boxes.xyxy.cpu().numpy().astype(int) if prediction.boxes is not None else []
+                live_state["count"] = len(boxes)
+                for n, (x1, y1, x2, y2) in enumerate(boxes, 1):
+                    cv2.rectangle(bgr, (x1,y1), (x2,y2), (255,90,20), 2)
+                    cv2.putText(bgr, str(n), (x1,max(18,y1-5)), cv2.FONT_HERSHEY_SIMPLEX, .6, (255,90,20), 2)
+            except Exception:
+                cv2.putText(bgr, "AI error", (12,65), cv2.FONT_HERSHEY_SIMPLEX, .7, (0,0,255), 2)
+            finally:
+                _live_camera_lock.release()
+        cv2.rectangle(bgr, (4,4), (255,42), (0,0,0), -1)
+        cv2.putText(bgr, f"Sheep in frame: {live_state['count']}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, .65, (255,255,255), 2)
+        return av.VideoFrame.from_ndarray(bgr, format="bgr24")
+
+    webrtc_streamer(
+        key="pelcon-live-phone-camera",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=RTCConfiguration({"iceServers":[{"urls":["stun:stun.l.google.com:19302"]}]}),
+        media_stream_constraints={"video":{"facingMode":"environment"},"audio":False},
+        video_frame_callback=live_video_frame,
+        async_processing=True,
+    )
+
 confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχνευσης", 0.10, 0.90, 0.20, 0.05)
 nms_threshold = st.sidebar.slider("Αφαίρεση επικαλυπτόμενων πλαισίων (NMS)", 0.20, 0.70, 0.35, 0.05, help="Μικρότερη τιμή αφαιρεί περισσότερα επικαλυπτόμενα πλαίσια, αλλά μπορεί να κρύψει γειτονικά πρόβατα.")
 tiled = st.sidebar.checkbox("Ενισχυμένη ανίχνευση (τμήματα εικόνας)", value=True, help="Αναλύει την εικόνα σε επικαλυπτόμενα τμήματα. Πιο αργή αλλά συχνά βρίσκει μικρότερα ζώα.")
