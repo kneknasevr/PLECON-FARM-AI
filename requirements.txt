@@ -6,3 +6,5 @@ pandas>=2.1,<3
 numpy>=1.26,<3
 streamlit-image-coordinates>=0.1.9,<1
 supabase>=2.10,<3
+streamlit-webrtc>=0.47,<1
+av>=12,<17
