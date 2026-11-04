@@ -152,6 +152,8 @@ _live_camera_lock = threading.Lock()
 with st.expander("📱 Live κάμερα κινητού — καταμέτρηση", expanded=False):
     st.caption("Πάτησε START, επίτρεψε την κάμερα και στόχευσε τα πρόβατα. Μετρά τα ζώα στο καρέ, όχι μοναδικά ζώα που περνούν.")
     st.warning("Πιλοτική λειτουργία WebRTC. Σε ορισμένα δίκτυα 5G μπορεί να μην συνδέεται χωρίς TURN server.")
+    st.link_button("🌐 Άνοιγμα Live σε Chrome / εξωτερικό browser", "https://pelcon-farm-ai.streamlit.app/", help="Άνοιξε τον σύνδεσμο σε Chrome, όχι μέσα στο APK. Μετά άνοιξε ξανά αυτή την ενότητα.")
+    st.caption("Αν το START δεν εμφανίζεται: άνοιξε από Chrome, ανανέωσε τη σελίδα και επίτρεψε την κάμερα όταν ζητηθεί.")
     live_state = {"count": 0}
 
     def live_video_frame(frame):
@@ -176,7 +178,7 @@ with st.expander("📱 Live κάμερα κινητού — καταμέτρησ
         cv2.putText(bgr, f"Sheep in frame: {live_state['count']}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, .65, (255,255,255), 2)
         return av.VideoFrame.from_ndarray(bgr, format="bgr24")
 
-    webrtc_streamer(
+    live_context = webrtc_streamer(
         key="pelcon-live-phone-camera",
         mode=WebRtcMode.SENDRECV,
         rtc_configuration=RTCConfiguration({"iceServers":[{"urls":["stun:stun.l.google.com:19302"]}]}),
@@ -184,6 +186,10 @@ with st.expander("📱 Live κάμερα κινητού — καταμέτρησ
         video_frame_callback=live_video_frame,
         async_processing=True,
     )
+    if live_context.state.playing:
+        st.success("Η ζωντανή μετάδοση είναι ενεργή. Ο μετρητής εμφανίζεται πάνω στο βίντεο.")
+    else:
+        st.info("Αναμονή σύνδεσης. Αν δεν εμφανίζεται START, δοκίμασε από Chrome. Αν εμφανίζεται αλλά δεν συνδέεται μέσω 5G, μπορεί να απαιτείται TURN.")
 
     st.divider()
     st.markdown("**📸 Εναλλακτική: άμεση φωτογραφία και καταμέτρηση**")
