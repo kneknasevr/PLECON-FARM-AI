@@ -185,6 +185,19 @@ with st.expander("📱 Live κάμερα κινητού — καταμέτρησ
         async_processing=True,
     )
 
+    st.divider()
+    st.markdown("**📸 Εναλλακτική: άμεση φωτογραφία και καταμέτρηση**")
+    st.caption("Αν δεν εμφανίζεται το START, πάτησε το κουμπί παρακάτω. Η φωτογραφία αναλύεται αμέσως, χωρίς ξεχωριστό ανέβασμα.")
+    phone_photo = st.camera_input("Άνοιγμα κάμερας / Λήψη φωτογραφίας", key="phone_camera_snapshot")
+    if phone_photo is not None:
+        try:
+            phone_rgb = np.array(Image.open(phone_photo).convert("RGB"))
+            phone_boxes = detect(phone_rgb, confidence=0.30, tiled=True, nms_threshold=0.35)
+            st.metric("Πρόβατα στη φωτογραφία", len(phone_boxes))
+            st.image(annotate(phone_rgb, phone_boxes), caption="Αριθμημένα ζώα (ενδεικτικά περιγράμματα)", use_container_width=True)
+        except Exception as error:
+            st.error(f"Η καταμέτρηση απέτυχε: {error}")
+
 confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχνευσης", 0.10, 0.90, 0.20, 0.05)
 nms_threshold = st.sidebar.slider("Αφαίρεση επικαλυπτόμενων πλαισίων (NMS)", 0.20, 0.70, 0.35, 0.05, help="Μικρότερη τιμή αφαιρεί περισσότερα επικαλυπτόμενα πλαίσια, αλλά μπορεί να κρύψει γειτονικά πρόβατα.")
 tiled = st.sidebar.checkbox("Ενισχυμένη ανίχνευση (τμήματα εικόνας)", value=True, help="Αναλύει την εικόνα σε επικαλυπτόμενα τμήματα. Πιο αργή αλλά συχνά βρίσκει μικρότερα ζώα.")
