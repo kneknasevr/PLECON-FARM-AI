@@ -1,5 +1,9 @@
 package com.pelconfarm.ai;
 import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.webkit.PermissionRequest;
+import android.os.Build;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
@@ -38,7 +42,18 @@ public class MainActivity extends Activity {
     return true;
    }
   });
+  if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{Manifest.permission.CAMERA}, 4103);
   webView.setWebChromeClient(new WebChromeClient() {
+   @Override public void onPermissionRequest(PermissionRequest request) {
+    runOnUiThread(() -> {
+     if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED && request.getOrigin().toString().startsWith(HOME)) {
+      for (String resource : request.getResources()) {
+       if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) { request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE}); return; }
+      }
+     }
+     request.deny();
+    });
+   }
    @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
     if(uploadCallback!=null) uploadCallback.onReceiveValue(null);
     uploadCallback=callback;
