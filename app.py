@@ -178,13 +178,15 @@ with st.expander("📱 Live κάμερα κινητού — καταμέτρησ
         cv2.putText(bgr, f"Sheep in frame: {live_state['count']}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, .65, (255,255,255), 2)
         return av.VideoFrame.from_ndarray(bgr, format="bgr24")
 
+    # The phone sends video to the AI server; it does not need a return camera stream.
     live_context = webrtc_streamer(
         key="pelcon-live-phone-camera",
-        mode=WebRtcMode.SENDRECV,
+        mode=WebRtcMode.SENDONLY,
         rtc_configuration=RTCConfiguration({"iceServers":[{"urls":["stun:stun.l.google.com:19302"]}]}),
         media_stream_constraints={"video":{"facingMode":"environment"},"audio":False},
         video_frame_callback=live_video_frame,
         async_processing=True,
+        desired_playing_state=False,
     )
     if live_context.state.playing:
         st.success("Η ζωντανή μετάδοση είναι ενεργή. Ο μετρητής εμφανίζεται πάνω στο βίντεο.")
