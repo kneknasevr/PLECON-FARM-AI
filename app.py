@@ -17,7 +17,7 @@ import av
 
 st.set_page_config(page_title="PELCON FARM AI", page_icon="🐑", layout="wide")
 st.title("🐑 PELCON FARM AI")
-from sheep_registry import render_registry
+from sheep_registry import render_registry, render_video_candidates
 with st.expander("📒 Μητρώο προβάτων (μόνιμη αποθήκευση)", expanded=False):
     render_registry()
 st.caption("Δοκιμαστική ανίχνευση και καταμέτρηση προβάτων — χωρίς σύνδεση με κάμερες")
@@ -279,6 +279,7 @@ if uploaded is not None:
                 max_processed = 900
                 st.caption("Ανάλυση έως 900 δειγματοληπτικών καρέ (περίπου 3 λεπτά στα 5 fps).")
                 records, sample_frames, unique_ids = [], [], set()
+                candidate_crops = {}
                 preview = st.empty()
                 progress = st.progress(0)
                 frame_idx, processed = 0, 0
@@ -298,6 +299,17 @@ if uploaded is not None:
                         if result.boxes is not None and result.boxes.id is not None:
                             ids = [int(x) for x in result.boxes.id.cpu().numpy()]
                         unique_ids.update(ids)
+                        if result.boxes is not None and result.boxes.id is not None:
+                            for track_id, xyxy in zip(ids, result.boxes.xyxy.cpu().numpy().astype(int)):
+                                key = str(track_id)
+                                if key not in candidate_crops and len(candidate_crops) < 120:
+                                    x1, y1, x2, y2 = xyxy
+                                    x1, y1 = max(0, x1), max(0, y1)
+                                    x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
+                                    if x2 - x1 >= 48 and y2 - y1 >= 48:
+                                        ok_jpg, encoded = cv2.imencode(".jpg", frame[y1:y2, x1:x2])
+                                        if ok_jpg:
+                                            candidate_crops[key] = encoded.tobytes()
                         count = len(result.boxes) if result.boxes is not None else 0
                         records.append({"second": round(frame_idx / fps, 1), "detected_sheep": count,
                                         "tracked_in_frame": len(ids), "cumulative_track_ids": len(unique_ids)})
@@ -330,6 +342,7 @@ if uploaded is not None:
                         st.download_button("⬇️ Λήψη επεξεργασμένου βίντεο", annotated_bytes,
                                            file_name="pelcon_purple_tracking.mp4", mime="video/mp4")
                     st.metric("Μέγιστα πρόβατα ταυτόχρονα σε καρέ", int(df.detected_sheep.max()))
+                    render_video_candidates(candidate_crops)
                     st.caption("Προσοχή: αν ένα ζώο χαθεί και επανεμφανιστεί, μπορεί να λάβει νέο ID και να διπλομετρηθεί. Σε πυκνό κοπάδι η εκτίμηση μπορεί να είναι ανακριβής.")
                     if processed >= max_processed:
                         st.warning("Έγινε ανάλυση μόνο του πρώτου τμήματος του βίντεο λόγω ορίου επεξεργασίας.")
