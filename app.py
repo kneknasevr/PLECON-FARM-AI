@@ -233,7 +233,14 @@ confidence = st.sidebar.slider("Ελάχιστη βεβαιότητα ανίχν
 nms_threshold = st.sidebar.slider("Αφαίρεση επικαλυπτόμενων πλαισίων (NMS)", 0.20, 0.70, 0.35, 0.05, help="Μικρότερη τιμή αφαιρεί περισσότερα επικαλυπτόμενα πλαίσια, αλλά μπορεί να κρύψει γειτονικά πρόβατα.")
 tiled = st.sidebar.checkbox("Ενισχυμένη ανίχνευση (τμήματα εικόνας)", value=True, help="Αναλύει την εικόνα σε επικαλυπτόμενα τμήματα. Πιο αργή αλλά συχνά βρίσκει μικρότερα ζώα.")
 st.sidebar.info("Το γενικό μοντέλο ενδέχεται να παραλείψει πρόβατα που επικαλύπτονται.")
-uploaded = st.file_uploader("Ανέβασε φωτογραφία ή σύντομο βίντεο", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"])
+st.subheader("🎥 Βίντεο → εντοπισμός → φωτογραφίες για μητρώο")
+st.caption("Εδώ ανεβάζεις βίντεο MP4, MOV ή AVI έως 500 MB. Μετά την ανάλυση επιλέγεις ζώα και αποθηκεύεις φωτογραφίες τους στο μητρώο. Η αναγνώριση του ίδιου ζώου σε νέο βίντεο δεν είναι ακόμη διαθέσιμη.")
+video_upload = st.file_uploader("📹 Ανέβασε βίντεο για καταμέτρηση και καταγραφή στο μητρώο", type=["mp4", "mov", "avi"], key="video_registry_upload")
+st.subheader("📷 Φωτογραφία → ανίχνευση")
+image_upload = st.file_uploader("Ανέβασε φωτογραφία", type=["jpg", "jpeg", "png"], key="image_detection_upload")
+uploaded = video_upload if video_upload is not None else image_upload
+if video_upload is not None and image_upload is not None:
+    st.info("Έχει προτεραιότητα το βίντεο. Αφαίρεσέ το για ανάλυση φωτογραφίας.")
 
 if uploaded is not None:
     suffix = Path(uploaded.name).suffix.lower()
