@@ -60,6 +60,27 @@ def detect(frame, confidence, tiled=True, nms_threshold=0.35):
         return np.empty((0, 4), dtype=int)
     return np.array([all_boxes[int(i)] for i in np.array(keep).flatten()], dtype=int)
 
+def purple_tracking_overlay(frame, result, unique_total):
+    """Purple translucent detection boxes and persistent track labels (not segmentation)."""
+    out = frame.copy()
+    boxes = result.boxes
+    if boxes is not None and len(boxes):
+        coords = boxes.xyxy.cpu().numpy().astype(int)
+        ids = boxes.id.cpu().numpy().astype(int) if boxes.id is not None else None
+        shade = out.copy()
+        for x1, y1, x2, y2 in coords:
+            cv2.rectangle(shade, (x1, y1), (x2, y2), (180, 45, 180), -1)
+        out = cv2.addWeighted(shade, 0.22, out, 0.78, 0)
+        for i, (x1, y1, x2, y2) in enumerate(coords):
+            cv2.rectangle(out, (x1, y1), (x2, y2), (220, 55, 220), 3)
+            label = f"ID {ids[i]}" if ids is not None else "Sheep"
+            cv2.putText(out, label, (max(0, x1), max(20, y1 - 7)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    cv2.rectangle(out, (0, 0), (min(out.shape[1], 420), 48), (45, 20, 55), -1)
+    cv2.putText(out, f"Tracked IDs: {unique_total}", (12, 33),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    return out
+
 def image_png_bytes(rgb):
     buf = io.BytesIO()
     Image.fromarray(rgb).save(buf, format="PNG")
@@ -242,6 +263,8 @@ if uploaded is not None:
             st.error(f"Το βίντεο υπερβαίνει τα {max_mb} MB.")
         else:
             tmp_path = None
+            output_path = None
+            writer = None
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                     tmp.write(uploaded.getbuffer())
@@ -260,6 +283,9 @@ if uploaded is not None:
                 progress = st.progress(0)
                 frame_idx, processed = 0, 0
                 model = load_model()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as output_file:
+                    output_path = output_file.name
+                writer_fps = max(1.0, fps / stride)
                 while processed < max_processed:
                     ok, frame = cap.read()
                     if not ok:
@@ -275,8 +301,14 @@ if uploaded is not None:
                         count = len(result.boxes) if result.boxes is not None else 0
                         records.append({"second": round(frame_idx / fps, 1), "detected_sheep": count,
                                         "tracked_in_frame": len(ids), "cumulative_track_ids": len(unique_ids)})
+                        shown = purple_tracking_overlay(frame, result, len(unique_ids))
+                        if writer is None:
+                            h, w = shown.shape[:2]
+                            writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), writer_fps, (w, h))
+                            if not writer.isOpened():
+                                raise RuntimeError("Δεν είναι δυνατή η δημιουργία επεξεργασμένου MP4.")
+                        writer.write(shown)
                         if processed % 20 == 0:
-                            shown = result.plot()
                             preview.image(cv2.cvtColor(shown, cv2.COLOR_BGR2RGB),
                                           caption=f"Χρόνος {frame_idx/fps:.1f} δευτ. — μοναδικά track IDs: {len(unique_ids)}",
                                           use_container_width=True)
@@ -284,9 +316,19 @@ if uploaded is not None:
                         progress.progress(min(1.0, processed / max_processed))
                     frame_idx += 1
                 cap.release()
+                if writer is not None:
+                    writer.release()
+                    writer = None
                 if records:
                     df = pd.DataFrame(records)
                     st.metric("Εκτίμηση διαφορετικών προβάτων (track IDs)", len(unique_ids))
+                    if output_path and Path(output_path).stat().st_size:
+                        st.subheader("▶️ Βίντεο με μωβ επισήμανση και καταμέτρηση")
+                        st.caption("Η αναπαραγωγή γίνεται αφού ολοκληρωθεί η επεξεργασία. Το βίντεο περιέχει τα δειγματοληπτικά καρέ, χωρίς ήχο.")
+                        annotated_bytes = Path(output_path).read_bytes()
+                        st.video(annotated_bytes, format="video/mp4")
+                        st.download_button("⬇️ Λήψη επεξεργασμένου βίντεο", annotated_bytes,
+                                           file_name="pelcon_purple_tracking.mp4", mime="video/mp4")
                     st.metric("Μέγιστα πρόβατα ταυτόχρονα σε καρέ", int(df.detected_sheep.max()))
                     st.caption("Προσοχή: αν ένα ζώο χαθεί και επανεμφανιστεί, μπορεί να λάβει νέο ID και να διπλομετρηθεί. Σε πυκνό κοπάδι η εκτίμηση μπορεί να είναι ανακριβής.")
                     if processed >= max_processed:
@@ -302,8 +344,12 @@ if uploaded is not None:
             except Exception as exc:
                 st.error(f"Δεν ήταν δυνατή η ανάλυση βίντεο: {exc}")
             finally:
+                if writer is not None:
+                    writer.release()
                 if tmp_path:
                     Path(tmp_path).unlink(missing_ok=True)
+                if output_path:
+                    Path(output_path).unlink(missing_ok=True)
 
 st.divider()
 st.caption("Πιλοτική εφαρμογή. Δεν παρέχει ακόμη αναγνώριση συγκεκριμένου ζώου ή αντιστοίχιση RFID.")
