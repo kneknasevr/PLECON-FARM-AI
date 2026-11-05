@@ -264,6 +264,16 @@ if uploaded is not None:
         if uploaded.size > max_mb * 1024 * 1024:
             st.error(f"Το βίντεο υπερβαίνει τα {max_mb} MB.")
         else:
+            video_key = hashlib.sha256(uploaded.getvalue()).hexdigest()
+            cached = st.session_state.get("pelcon_last_video")
+            if cached and cached.get("key") == video_key:
+                st.success("Η ανάλυση ολοκληρώθηκε. Οι φωτογραφίες είναι διαθέσιμες για αποθήκευση.")
+                st.metric("Εκτίμηση track IDs", cached["count"])
+                render_video_candidates(cached["crops"])
+                if st.button("🔄 Επανάληψη ανάλυσης βίντεο"):
+                    st.session_state.pop("pelcon_last_video", None)
+                    st.rerun()
+                st.stop()
             tmp_path = None
             output_path = None
             writer = None
@@ -345,7 +355,8 @@ if uploaded is not None:
                                            file_name="pelcon_purple_tracking.mp4", mime="video/mp4")
                     st.metric("Μέγιστα πρόβατα ταυτόχρονα σε καρέ", int(df.detected_sheep.max()))
                     if render_video_candidates is not None:
-                        render_video_candidates(candidate_crops)
+                        st.session_state["pelcon_last_video"] = {"key": video_key, "crops": candidate_crops, "count": len(unique_ids)}
+                    render_video_candidates(candidate_crops)
                     else:
                         st.warning('Η αποθήκευση από βίντεο δεν είναι ακόμη διαθέσιμη σε αυτή την έκδοση.')
                     st.caption("Προσοχή: αν ένα ζώο χαθεί και επανεμφανιστεί, μπορεί να λάβει νέο ID και να διπλομετρηθεί. Σε πυκνό κοπάδι η εκτίμηση μπορεί να είναι ανακριβής.")
