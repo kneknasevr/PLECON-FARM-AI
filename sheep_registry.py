@@ -159,3 +159,62 @@ def render_registry():
                     st.warning("Το ποσοστό είναι δείκτης οπτικής ομοιότητας, ΟΧΙ πιθανότητα ότι πρόκειται για το ίδιο πρόβατο. Δοκίμασε και φωτογραφία διαφορετικού ζώου.")
             except Exception as exc:
                 st.error(f"Αποτυχία σύγκρισης: {exc}")
+
+def render_video_candidates(candidates):
+    """Review and explicitly save video track crops to the existing sheep registry."""
+    if not candidates:
+        return
+    st.subheader("💾 Αποθήκευση εντοπισμένων ζώων")
+    st.warning("Τα Track IDs είναι προσωρινά: το ίδιο πρόβατο μπορεί να εμφανίζεται πολλές φορές. Επίλεξε μόνο ζώα που έχεις ελέγξει.")
+    auth = st.session_state.get("pelcon_auth")
+    if not auth:
+        st.info("Συνδέσου πρώτα στο Μητρώο προβάτων στο πάνω μέρος της σελίδας.")
+        return
+    try:
+        client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_PUBLISHABLE_KEY"])
+        client.auth.set_session(auth["access_token"], auth["refresh_token"])
+        user = client.auth.get_user().user
+        if not user:
+            st.error("Η σύνδεση στο μητρώο έληξε.")
+            return
+    except Exception as exc:
+        st.error(f"Δεν είναι διαθέσιμο το μητρώο: {exc}")
+        return
+    keys = sorted(candidates, key=lambda x: int(x))
+    chosen = st.multiselect("Επίλεξε προσωρινά IDs για αποθήκευση", keys,
+                            format_func=lambda x: f"Track {x}")
+    for key in chosen[:12]:
+        st.image(candidates[key], caption=f"Track {key}", width=190)
+    if st.button("💾 Αποθήκευση επιλεγμένων με φωτογραφίες", disabled=not chosen):
+        saved_count = 0
+        for key in chosen:
+            raw = candidates[key]
+            # Unique provisional label. The sheep row ID remains stable after renaming.
+            tag = f"AUTO-{uuid.uuid4().hex[:10].upper()}"
+            sheep_id = None
+            path = None
+            try:
+                row = client.table("sheep").insert({
+                    "ear_tag": tag,
+                    "notes": f"Προσωρινή καταχώριση από βίντεο, Track ID {key}. Απαιτείται επιβεβαίωση ταυτότητας."
+                }).execute().data
+                sheep_id = row[0]["id"]
+                path = f"{user.id}/{sheep_id}/{uuid.uuid4().hex}.jpg"
+                client.storage.from_("sheep-photos").upload(path, raw, {"content-type": "image/jpeg"})
+                client.table("sheep_photos").insert({"sheep_id": sheep_id, "storage_path": path}).execute()
+                st.success(f"Track {key} → {tag} (με φωτογραφία)")
+                saved_count += 1
+            except Exception as exc:
+                if path:
+                    try:
+                        client.storage.from_("sheep-photos").remove([path])
+                    except Exception:
+                        pass
+                if sheep_id:
+                    try:
+                        client.table("sheep").delete().eq("id", sheep_id).execute()
+                    except Exception:
+                        pass
+                st.error(f"Track {key}: {exc}")
+        if saved_count:
+            st.info("Άνοιξε το Μητρώο προβάτων για να διορθώσεις τους προσωρινούς αριθμούς. Η επόμενη ανάλυση δεν αναγνωρίζει ακόμη αυτόματα τα ίδια ζώα.")
