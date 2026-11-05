@@ -87,6 +87,24 @@ def render_registry():
         st.dataframe([{"Ενώτιο": r["ear_tag"], "Όνομα": r.get("name"), "Σημειώσεις": r.get("notes")} for r in rows], use_container_width=True)
         labels = {r["id"]: r["ear_tag"] for r in rows}
         selected = st.selectbox("Επίλεξε πρόβατο για φωτογραφίες", list(labels), format_func=lambda k: labels[k])
+        current = next(row for row in rows if row["id"] == selected)
+        with st.expander("✏️ Αλλαγή αριθμού προβάτου", expanded=False):
+            with st.form("edit_sheep_number"):
+                new_tag = st.text_input("Νέος αριθμός / ενώτιο", value=current["ear_tag"])
+                new_name = st.text_input("Όνομα (προαιρετικό)", value=current.get("name") or "")
+                if st.form_submit_button("💾 Αποθήκευση νέου αριθμού"):
+                    new_tag = new_tag.strip()
+                    if not new_tag:
+                        st.error("Ο αριθμός δεν μπορεί να είναι κενός.")
+                    elif any(row["ear_tag"] == new_tag and row["id"] != selected for row in rows):
+                        st.error("Αυτός ο αριθμός χρησιμοποιείται ήδη από άλλο πρόβατο.")
+                    else:
+                        try:
+                            client.table("sheep").update({"ear_tag": new_tag, "name": new_name.strip() or None}).eq("id", selected).execute()
+                            st.success("Ο αριθμός ενημερώθηκε. Οι αποθηκευμένες φωτογραφίες παραμένουν στο ίδιο ζώο.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Αποτυχία ενημέρωσης: {exc}")
         photos = st.file_uploader("Πρόσθεσε φωτογραφίες αναφοράς", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="sheep_photos_upload")
         if st.button("Μόνιμη αποθήκευση φωτογραφιών", disabled=not photos):
             for photo in photos:
