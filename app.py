@@ -17,7 +17,9 @@ import av
 
 st.set_page_config(page_title="PELCON FARM AI", page_icon="🐑", layout="wide")
 st.title("🐑 PELCON FARM AI")
-from sheep_registry import render_registry, render_video_candidates
+import sheep_registry
+render_registry = sheep_registry.render_registry
+render_video_candidates = getattr(sheep_registry, 'render_video_candidates', None)
 with st.expander("📒 Μητρώο προβάτων (μόνιμη αποθήκευση)", expanded=False):
     render_registry()
 st.caption("Δοκιμαστική ανίχνευση και καταμέτρηση προβάτων — χωρίς σύνδεση με κάμερες")
@@ -342,7 +344,10 @@ if uploaded is not None:
                         st.download_button("⬇️ Λήψη επεξεργασμένου βίντεο", annotated_bytes,
                                            file_name="pelcon_purple_tracking.mp4", mime="video/mp4")
                     st.metric("Μέγιστα πρόβατα ταυτόχρονα σε καρέ", int(df.detected_sheep.max()))
-                    render_video_candidates(candidate_crops)
+                    if render_video_candidates is not None:
+                        render_video_candidates(candidate_crops)
+                    else:
+                        st.warning('Η αποθήκευση από βίντεο δεν είναι ακόμη διαθέσιμη σε αυτή την έκδοση.')
                     st.caption("Προσοχή: αν ένα ζώο χαθεί και επανεμφανιστεί, μπορεί να λάβει νέο ID και να διπλομετρηθεί. Σε πυκνό κοπάδι η εκτίμηση μπορεί να είναι ανακριβής.")
                     if processed >= max_processed:
                         st.warning("Έγινε ανάλυση μόνο του πρώτου τμήματος του βίντεο λόγω ορίου επεξεργασίας.")
