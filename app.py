@@ -236,9 +236,10 @@ if uploaded is not None:
         except Exception as exc:
             st.error(f"Δεν ήταν δυνατή η ανάλυση εικόνας: {exc}")
     else:
-        st.warning("Στα βίντεο υπολογίζεται ο αριθμός προβάτων ανά καρέ, όχι ο συνολικός αριθμός μοναδικών ζώων.")
-        if uploaded.size > 100 * 1024 * 1024:
-            st.error("Για την πρώτη δοκιμή ανέβασε βίντεο έως 100 MB.")
+        st.info("Νέα λειτουργία: παρακολούθηση προβάτων με προσωρινά IDs (ByteTrack). Ο αριθμός είναι εκτίμηση μοναδικών διαδρομών, όχι εγγυημένα διαφορετικών ζώων.")
+        max_mb = 500
+        if uploaded.size > max_mb * 1024 * 1024:
+            st.error(f"Το βίντεο υπερβαίνει τα {max_mb} MB.")
         else:
             tmp_path = None
             try:
@@ -246,43 +247,58 @@ if uploaded is not None:
                     tmp.write(uploaded.getbuffer())
                     tmp_path = tmp.name
                 cap = cv2.VideoCapture(tmp_path)
-                fps = cap.get(cv2.CAP_PROP_FPS) or 25
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 if not cap.isOpened():
                     raise ValueError("Το βίντεο δεν άνοιξε. Δοκίμασε MP4/H.264.")
-                stride = max(1, round(fps * 2))
-                max_samples = 30
-                records = []
-                sample_frames = []
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                # Keep temporal gaps short enough for the tracker to maintain IDs.
+                stride = max(1, round(fps / 5))
+                max_processed = 900
+                st.caption("Ανάλυση έως 900 δειγματοληπτικών καρέ (περίπου 3 λεπτά στα 5 fps).")
+                records, sample_frames, unique_ids = [], [], set()
                 preview = st.empty()
                 progress = st.progress(0)
-                frame_idx = 0
-                while len(records) < max_samples:
+                frame_idx, processed = 0, 0
+                model = load_model()
+                while processed < max_processed:
                     ok, frame = cap.read()
                     if not ok:
                         break
                     if frame_idx % stride == 0:
-                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        boxes = detect(rgb, confidence, tiled, nms_threshold)
-                        records.append({"second": round(frame_idx / fps, 1), "detected_sheep": len(boxes)})
-                        sample_frames.append((rgb.copy(), boxes.copy()))
-                        preview.image(annotate(rgb, boxes), caption=f"Καρέ στα {frame_idx / fps:.1f} δευτ.", use_container_width=True)
-                        progress.progress(min(1.0, len(records) / max_samples))
+                        # persist=True keeps tracker identities across processed frames.
+                        result = model.track(source=frame, persist=True, tracker="bytetrack.yaml",
+                                             conf=confidence, classes=[18], verbose=False, imgsz=960)[0]
+                        ids = []
+                        if result.boxes is not None and result.boxes.id is not None:
+                            ids = [int(x) for x in result.boxes.id.cpu().numpy()]
+                        unique_ids.update(ids)
+                        count = len(result.boxes) if result.boxes is not None else 0
+                        records.append({"second": round(frame_idx / fps, 1), "detected_sheep": count,
+                                        "tracked_in_frame": len(ids), "cumulative_track_ids": len(unique_ids)})
+                        if processed % 20 == 0:
+                            shown = result.plot()
+                            preview.image(cv2.cvtColor(shown, cv2.COLOR_BGR2RGB),
+                                          caption=f"Χρόνος {frame_idx/fps:.1f} δευτ. — μοναδικά track IDs: {len(unique_ids)}",
+                                          use_container_width=True)
+                        processed += 1
+                        progress.progress(min(1.0, processed / max_processed))
                     frame_idx += 1
                 cap.release()
                 if records:
                     df = pd.DataFrame(records)
-                    st.metric("Μέγιστες ανιχνεύσεις σε ένα καρέ", int(df.detected_sheep.max()))
-                    st.line_chart(df.set_index("second")["detected_sheep"])
+                    st.metric("Εκτίμηση διαφορετικών προβάτων (track IDs)", len(unique_ids))
+                    st.metric("Μέγιστα πρόβατα ταυτόχρονα σε καρέ", int(df.detected_sheep.max()))
+                    st.caption("Προσοχή: αν ένα ζώο χαθεί και επανεμφανιστεί, μπορεί να λάβει νέο ID και να διπλομετρηθεί. Σε πυκνό κοπάδι η εκτίμηση μπορεί να είναι ανακριβής.")
+                    if processed >= max_processed:
+                        st.warning("Έγινε ανάλυση μόνο του πρώτου τμήματος του βίντεο λόγω ορίου επεξεργασίας.")
+                    st.line_chart(df.set_index("second")[["detected_sheep", "cumulative_track_ids"]])
                     st.dataframe(df, use_container_width=True)
-                    st.subheader("Επίλεξε καρέ για διόρθωση")
-                    selected_frame = st.selectbox("Χρόνος καρέ", list(range(len(records))), format_func=lambda i: f"{records[i]['second']} δευτ. — {records[i]['detected_sheep']} ανιχνεύσεις")
-                    frame_rgb, frame_boxes = sample_frames[selected_frame]
-                    video_id = hashlib.sha256(uploaded.getvalue()).hexdigest()[:12]
-                    correction_editor(frame_rgb, frame_boxes, f"{video_id}_frame_{selected_frame}", "✏️ Διόρθωση επιλεγμένου καρέ βίντεο")
-                    st.download_button("Λήψη CSV βίντεο", df.to_csv(index=False).encode("utf-8-sig"), file_name="pelcon_video_counts.csv", mime="text/csv")
+                    st.download_button("Λήψη CSV παρακολούθησης",
+                                       df.to_csv(index=False).encode("utf-8-sig"),
+                                       file_name="pelcon_video_tracking.csv", mime="text/csv")
                 else:
                     st.error("Δεν βρέθηκαν καρέ για ανάλυση.")
+
             except Exception as exc:
                 st.error(f"Δεν ήταν δυνατή η ανάλυση βίντεο: {exc}")
             finally:
