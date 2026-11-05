@@ -8,3 +8,4 @@ streamlit-image-coordinates>=0.1.9,<1
 supabase>=2.10,<3
 streamlit-webrtc>=0.47,<1
 av>=12,<17
+lap>=0.5.12,<1
