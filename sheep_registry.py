@@ -166,9 +166,18 @@ def render_video_candidates(candidates):
         return
     st.subheader("💾 Αποθήκευση εντοπισμένων ζώων")
     st.warning("Τα Track IDs είναι προσωρινά: το ίδιο πρόβατο μπορεί να εμφανίζεται πολλές φορές. Επίλεξε μόνο ζώα που έχεις ελέγξει.")
+    keys = sorted(candidates, key=lambda x: int(x))
+    st.caption(f"Βρέθηκαν {len(keys)} φωτογραφίες από προσωρινά Track IDs. Οι φωτογραφίες είναι προεπισκοπήσεις, όχι βεβαιωμένες ταυτότητες.")
+    for key in keys[:30]:
+        with st.container():
+            st.image(candidates[key], caption=f"Πρόβατο / Track {key}", width=210)
+    if len(keys) > 30:
+        st.info("Εμφανίζονται οι πρώτες 30 φωτογραφίες. Μπορείς να επιλέξεις και τις υπόλοιπες από τη λίστα.")
+    chosen = st.multiselect("Επίλεξε τα ζώα που θέλεις να αποθηκεύσεις", keys,
+                            format_func=lambda x: f"Track {x}")
     auth = st.session_state.get("pelcon_auth")
     if not auth:
-        st.info("Συνδέσου πρώτα στο Μητρώο προβάτων στο πάνω μέρος της σελίδας.")
+        st.warning("Για να αποθηκεύσεις τις επιλεγμένες φωτογραφίες, συνδέσου πρώτα στο Μητρώο προβάτων στο πάνω μέρος της σελίδας.")
         return
     try:
         client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_PUBLISHABLE_KEY"])
@@ -180,11 +189,6 @@ def render_video_candidates(candidates):
     except Exception as exc:
         st.error(f"Δεν είναι διαθέσιμο το μητρώο: {exc}")
         return
-    keys = sorted(candidates, key=lambda x: int(x))
-    chosen = st.multiselect("Επίλεξε προσωρινά IDs για αποθήκευση", keys,
-                            format_func=lambda x: f"Track {x}")
-    for key in chosen[:12]:
-        st.image(candidates[key], caption=f"Track {key}", width=190)
     if st.button("💾 Αποθήκευση επιλεγμένων με φωτογραφίες", disabled=not chosen):
         saved_count = 0
         for key in chosen:
