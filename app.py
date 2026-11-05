@@ -354,9 +354,9 @@ if uploaded is not None:
                         st.download_button("⬇️ Λήψη επεξεργασμένου βίντεο", annotated_bytes,
                                            file_name="pelcon_purple_tracking.mp4", mime="video/mp4")
                     st.metric("Μέγιστα πρόβατα ταυτόχρονα σε καρέ", int(df.detected_sheep.max()))
+                    st.session_state["pelcon_last_video"] = {"key": video_key, "crops": candidate_crops, "count": len(unique_ids)}
                     if render_video_candidates is not None:
-                        st.session_state["pelcon_last_video"] = {"key": video_key, "crops": candidate_crops, "count": len(unique_ids)}
-                    render_video_candidates(candidate_crops)
+                        render_video_candidates(candidate_crops)
                     else:
                         st.warning('Η αποθήκευση από βίντεο δεν είναι ακόμη διαθέσιμη σε αυτή την έκδοση.')
                     st.caption("Προσοχή: αν ένα ζώο χαθεί και επανεμφανιστεί, μπορεί να λάβει νέο ID και να διπλομετρηθεί. Σε πυκνό κοπάδι η εκτίμηση μπορεί να είναι ανακριβής.")
