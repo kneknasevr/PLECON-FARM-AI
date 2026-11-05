@@ -170,7 +170,11 @@ def render_video_candidates(candidates):
     st.caption(f"Βρέθηκαν {len(keys)} φωτογραφίες από προσωρινά Track IDs. Οι φωτογραφίες είναι προεπισκοπήσεις, όχι βεβαιωμένες ταυτότητες.")
     for key in keys[:30]:
         with st.container():
-            st.image(candidates[key], caption=f"Πρόβατο / Track {key}", width=210)
+            try:
+                photo = Image.open(io.BytesIO(candidates[key])).convert("RGB")
+                st.image(photo, caption=f"Πρόβατο / Track {key}", width=210)
+            except Exception as exc:
+                st.warning(f"Track {key}: δεν ήταν δυνατή η προβολή φωτογραφίας ({exc}).")
     if len(keys) > 30:
         st.info("Εμφανίζονται οι πρώτες 30 φωτογραφίες. Μπορείς να επιλέξεις και τις υπόλοιπες από τη λίστα.")
     chosen = st.multiselect("Επίλεξε τα ζώα που θέλεις να αποθηκεύσεις", keys,
